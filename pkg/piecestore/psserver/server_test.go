@@ -42,7 +42,7 @@ func TestPiece(t *testing.T) {
 	defer ctx.Cleanup()
 
 	snID, upID := newTestID(ctx, t), newTestID(ctx, t)
-	s, c, cleanup := NewTest(ctx, t, snID, upID, []storj.NodeID{})
+	s, c, cleanup := NewTest(ctx, t, snID, upID, nil)
 	defer cleanup()
 
 	if err := writeFile(s, "11111111111111111111"); err != nil {
@@ -128,8 +128,9 @@ func TestRetrieve(t *testing.T) {
 	ctx := testcontext.New(t)
 	defer ctx.Cleanup()
 
-	snID, upID := newTestID(ctx, t), newTestID(ctx, t)
-	s, c, cleanup := NewTest(ctx, t, snID, upID, []storj.NodeID{})
+	satID, snID, upID := newTestID(ctx, t), newTestID(ctx, t), newTestID(ctx, t)
+	satWhitelist := map[storj.NodeID]crypto.PublicKey{satID.ID: satID.Leaf.PublicKey}
+	s, c, cleanup := NewTest(ctx, t, snID, upID, satWhitelist)
 	defer cleanup()
 
 	if err := writeFile(s, "11111111111111111111"); err != nil {
@@ -235,7 +236,7 @@ func TestRetrieve(t *testing.T) {
 			err = stream.Send(&pb.PieceRetrieval{PieceData: &pb.PieceRetrieval_PieceData{Id: tt.id, PieceSize: tt.reqSize, Offset: tt.offset}})
 			require.NoError(t, err)
 
-			pba, err := testbwagreement.GeneratePayerBandwidthAllocation(pb.BandwidthAction_GET, snID, upID, time.Hour)
+			pba, err := testbwagreement.GeneratePayerBandwidthAllocation(pb.BandwidthAction_GET, satID, upID, time.Hour)
 			require.NoError(t, err)
 
 			totalAllocated := int64(0)
@@ -281,32 +282,24 @@ func TestStore(t *testing.T) {
 	ctx := testcontext.New(t)
 	defer ctx.Cleanup()
 
-	satID := newTestID(ctx, t)
+	satID, snID, upID := newTestID(ctx, t), newTestID(ctx, t), newTestID(ctx, t)
+	satWhitelist := map[storj.NodeID]crypto.PublicKey{satID.ID: satID.Leaf.PublicKey}
 
 	tests := []struct {
 		id            string
 		satelliteID   storj.NodeID
-		whitelist     []storj.NodeID
+		whitelist     map[storj.NodeID]crypto.PublicKey
 		ttl           int64
 		content       []byte
 		message       string
 		totalReceived int64
 		err           string
 	}{
-		{ // should successfully store data with no approved satellites
-			id:            "99999999999999999999",
-			satelliteID:   satID.ID,
-			whitelist:     []storj.NodeID{},
-			ttl:           9999999999,
-			content:       []byte("xyzwq"),
-			message:       "OK",
-			totalReceived: 5,
-			err:           "",
-		},
+		// todo:  add tests which requrie kademlia, like uploading without a whitelist
 		{ // should err with invalid id length
 			id:            "butts",
 			satelliteID:   satID.ID,
-			whitelist:     []storj.NodeID{satID.ID},
+			whitelist:     satWhitelist,
 			ttl:           9999999999,
 			content:       []byte("xyzwq"),
 			message:       "",
@@ -316,7 +309,7 @@ func TestStore(t *testing.T) {
 		{ // should err with piece ID not specified
 			id:            "",
 			satelliteID:   satID.ID,
-			whitelist:     []storj.NodeID{satID.ID},
+			whitelist:     satWhitelist,
 			ttl:           9999999999,
 			content:       []byte("xyzwq"),
 			message:       "",
@@ -327,7 +320,6 @@ func TestStore(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run("", func(t *testing.T) {
-			snID, upID := newTestID(ctx, t), newTestID(ctx, t)
 			s, c, cleanup := NewTest(ctx, t, snID, upID, tt.whitelist)
 			defer cleanup()
 			db := s.DB.DB
@@ -392,42 +384,47 @@ func TestStore(t *testing.T) {
 
 func TestPbaValidation(t *testing.T) {
 	ctx := testcontext.New(t)
-	snID, upID := newTestID(ctx, t), newTestID(ctx, t)
+	badSatID, snID, upID := newTestID(ctx, t), newTestID(ctx, t), newTestID(ctx, t)
 	satID1, satID2, satID3 := newTestID(ctx, t), newTestID(ctx, t), newTestID(ctx, t)
 	defer ctx.Cleanup()
+	satWhitelist := map[storj.NodeID]crypto.PublicKey{
+		satID1.ID: satID1.Leaf.PublicKey,
+		satID2.ID: satID2.Leaf.PublicKey,
+		satID3.ID: satID3.Leaf.PublicKey,
+	}
 
 	tests := []struct {
 		satelliteID storj.NodeID
 		uplinkID    storj.NodeID
-		whitelist   []storj.NodeID
+		whitelist   map[storj.NodeID]crypto.PublicKey
 		action      pb.BandwidthAction
 		err         string
 	}{
 		{ // unapproved satellite id
-			satelliteID: satID1.ID,
+			satelliteID: badSatID.ID,
 			uplinkID:    upID.ID,
-			whitelist:   []storj.NodeID{satID1.ID, satID2.ID, satID3.ID},
+			whitelist:   satWhitelist,
 			action:      pb.BandwidthAction_PUT,
 			err:         "rpc error: code = Unknown desc = store error: Satellite ID not approved",
 		},
 		{ // missing satellite id
 			satelliteID: storj.NodeID{},
 			uplinkID:    upID.ID,
-			whitelist:   []storj.NodeID{satID1.ID, satID2.ID, satID3.ID},
+			whitelist:   satWhitelist,
 			action:      pb.BandwidthAction_PUT,
 			err:         "rpc error: code = Unknown desc = store error: payer bandwidth allocation: missing satellite id",
 		},
 		{ // missing uplink id
-			satelliteID: satID1.ID,
+			satelliteID: satID2.ID,
 			uplinkID:    storj.NodeID{},
-			whitelist:   []storj.NodeID{satID1.ID, satID2.ID, satID3.ID},
+			whitelist:   satWhitelist,
 			action:      pb.BandwidthAction_PUT,
 			err:         "rpc error: code = Unknown desc = store error: payer bandwidth allocation: missing uplink id",
 		},
 		{ // wrong action type
-			satelliteID: satID1.ID,
+			satelliteID: satID2.ID,
 			uplinkID:    upID.ID,
-			whitelist:   []storj.NodeID{satID1.ID, satID2.ID, satID3.ID},
+			whitelist:   satWhitelist,
 			action:      pb.BandwidthAction_GET,
 			err:         "rpc error: code = Unknown desc = store error: payer bandwidth allocation: invalid action GET",
 		},
@@ -448,7 +445,7 @@ func TestPbaValidation(t *testing.T) {
 			require.NoError(t, err)
 			// Send Bandwidth Allocation Data
 			content := []byte("content")
-			pba, err := testbwagreement.GeneratePayerBandwidthAllocation(tt.action, satID1, upID, time.Hour)
+			pba, err := testbwagreement.GeneratePayerBandwidthAllocation(tt.action, satID2, upID, time.Hour)
 			require.NoError(t, err)
 			rba, err := testbwagreement.GenerateRenterBandwidthAllocation(pba, snID.ID, upID, int64(len(content)))
 			require.NoError(t, err)
@@ -480,7 +477,7 @@ func TestDelete(t *testing.T) {
 	defer ctx.Cleanup()
 
 	snID, upID := newTestID(ctx, t), newTestID(ctx, t)
-	s, c, cleanup := NewTest(ctx, t, snID, upID, []storj.NodeID{})
+	s, c, cleanup := NewTest(ctx, t, snID, upID, nil)
 	defer cleanup()
 
 	db := s.DB.DB
@@ -552,7 +549,7 @@ func TestDelete(t *testing.T) {
 }
 
 func NewTest(ctx context.Context, t *testing.T, snID, upID *identity.FullIdentity,
-	ids []storj.NodeID) (*Server, pb.PieceStoreRoutesClient, func()) {
+	whitelist map[storj.NodeID]crypto.PublicKey) (*Server, pb.PieceStoreRoutesClient, func()) {
 	//init ps server backend
 	tmp, err := ioutil.TempDir("", "storj-piecestore")
 	require.NoError(t, err)
@@ -564,10 +561,6 @@ func NewTest(ctx context.Context, t *testing.T, snID, upID *identity.FullIdentit
 	verifier := func(authorization *pb.SignedMessage) error {
 		return nil
 	}
-	whitelist := make(map[storj.NodeID]crypto.PublicKey)
-	for _, id := range ids {
-		whitelist[id] = nil
-	}
 	psServer := &Server{
 		log:              zaptest.NewLogger(t),
 		storage:          storage,
@@ -575,7 +568,7 @@ func NewTest(ctx context.Context, t *testing.T, snID, upID *identity.FullIdentit
 		verifier:         verifier,
 		totalAllocated:   math.MaxInt64,
 		totalBwAllocated: math.MaxInt64,
-		whitelist:        whitelist,
+		satelliteKeys:    whitelist,
 	}
 	//init ps server grpc
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
