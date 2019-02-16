@@ -62,13 +62,18 @@ func (r *pieceRanger) Range(ctx context.Context, offset, length int64) (io.ReadC
 		return ioutil.NopCloser(bytes.NewReader([]byte{})), nil
 	}
 
+	rba := &pb.RenterBandwidthAllocation{
+		PayerAllocation: *r.pba,
+		StorageNodeId:   r.c.remoteID,
+	}
+
 	// send piece data
 	if err := r.stream.Send(&pb.PieceRetrieval{
-		PieceData:       &pb.PieceRetrieval_PieceData{Id: r.id.String(), PieceSize: length, Offset: offset},
-		PayerAllocation: r.pba,
+		PieceData:           &pb.PieceRetrieval_PieceData{Id: r.id.String(), PieceSize: length, Offset: offset},
+		BandwidthAllocation: rba,
 	}); err != nil {
 		return nil, err
 	}
 
-	return NewStreamReader(r.c, r.stream, r.pba, r.size), nil
+	return NewStreamReader(r.c, r.stream, rba, r.size), nil
 }

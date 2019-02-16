@@ -117,15 +117,20 @@ func (ps *PieceStore) Meta(ctx context.Context, id PieceID) (*pb.PieceSummary, e
 }
 
 // Put uploads a Piece to a piece store Server
-func (ps *PieceStore) Put(ctx context.Context, id PieceID, data io.Reader, ttl time.Time, ba *pb.PayerBandwidthAllocation) error {
+func (ps *PieceStore) Put(ctx context.Context, id PieceID, data io.Reader, ttl time.Time, pba *pb.PayerBandwidthAllocation) error {
 	stream, err := ps.client.Store(ctx)
 	if err != nil {
 		return err
 	}
 
+	rba := &pb.RenterBandwidthAllocation{
+		PayerAllocation: *pba,
+		StorageNodeId:   ps.remoteID,
+	}
+
 	msg := &pb.PieceStore{
-		PieceData:       &pb.PieceStore_PieceData{Id: id.String(), ExpirationUnixSec: ttl.Unix()},
-		PayerAllocation: ba,
+		PieceData:           &pb.PieceStore_PieceData{Id: id.String(), ExpirationUnixSec: ttl.Unix()},
+		BandwidthAllocation: rba,
 	}
 	if err = stream.Send(msg); err != nil {
 		if _, closeErr := stream.CloseAndRecv(); closeErr != nil {
@@ -135,7 +140,7 @@ func (ps *PieceStore) Put(ctx context.Context, id PieceID, data io.Reader, ttl t
 		return fmt.Errorf("%v.Send() = %v", stream, err)
 	}
 
-	writer := &StreamWriter{signer: ps, stream: stream, pba: ba}
+	writer := &StreamWriter{signer: ps, stream: stream, rba: rba}
 
 	defer func() {
 		if err := writer.Close(); err != nil && err != io.EOF {

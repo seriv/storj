@@ -40,12 +40,13 @@ func (s *Server) Retrieve(stream pb.PieceStoreRoutes_RetrieveServer) (err error)
 		return RetrieveError.New("PieceStore message is nil")
 	}
 
-	pba := recv.GetPayerAllocation()
-	if pba == nil {
-		return RetrieveError.New("PayerBandwidthAllocation message is nil")
+	rba := recv.BandwidthAllocation
+	if rba == nil {
+		return StoreError.New("RenterBandwidthAllocation message is nil")
 	}
 
-	id, err := getNamespacedPieceID([]byte(pd.GetId()), pba.SatelliteId.Bytes())
+	payerAllocation := rba.PayerAllocation
+	id, err := getNamespacedPieceID([]byte(pd.GetId()), payerAllocation.SatelliteId.Bytes())
 	if err != nil {
 		return err
 	}
@@ -133,6 +134,7 @@ func (s *Server) retrieveData(ctx context.Context, stream pb.PieceStoreRoutes_Re
 				return
 			}
 			pba := rba.PayerAllocation
+			fmt.Println("SatelliteID: ", pba.SatelliteId)
 			if err = s.verifyPayerAllocation(&pba, "GET"); err != nil {
 				allocationTracking.Fail(RetrieveError.Wrap(err))
 				return
