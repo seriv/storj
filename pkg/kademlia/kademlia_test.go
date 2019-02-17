@@ -82,11 +82,11 @@ func TestPeerDiscovery(t *testing.T) {
 
 	// make new identity
 	bootServer, mockBootServer, bootID, bootAddress := startTestNodeServer(ctx)
-	defer bootServer.Stop()
+	defer bootServer.GracefulStop()
 	testServer, _, testID, testAddress := startTestNodeServer(ctx)
-	defer testServer.Stop()
+	defer testServer.GracefulStop()
 	targetServer, _, targetID, targetAddress := startTestNodeServer(ctx)
-	defer targetServer.Stop()
+	defer targetServer.GracefulStop()
 
 	bootstrapNodes := []pb.Node{{Id: bootID.ID, Address: &pb.NodeAddress{Address: bootAddress}, Type: pb.NodeType_STORAGE}}
 	metadata := &pb.NodeMetadata{
@@ -130,18 +130,18 @@ func TestBootstrap(t *testing.T) {
 
 	bn, s, clean := testNode(ctx, "1", t, []pb.Node{})
 	defer clean()
-	defer s.Stop()
+	defer s.GracefulStop()
 
 	n1, s1, clean1 := testNode(ctx, "2", t, []pb.Node{bn.routingTable.self})
 	defer clean1()
-	defer s1.Stop()
+	defer s1.GracefulStop()
 
 	err := n1.Bootstrap(ctx)
 	assert.NoError(t, err)
 
 	n2, s2, clean2 := testNode(ctx, "3", t, []pb.Node{bn.routingTable.self})
 	defer clean2()
-	defer s2.Stop()
+	defer s2.GracefulStop()
 
 	err = n2.Bootstrap(ctx)
 	assert.NoError(t, err)
@@ -193,8 +193,7 @@ func TestRefresh(t *testing.T) {
 
 	k, s, clean := testNode(ctx, "refresh", t, []pb.Node{})
 	defer clean()
-	defer s.Stop()
-
+	defer s.GracefulStop()
 	//turn back time for only bucket
 	rt := k.routingTable
 	now := time.Now().UTC()
